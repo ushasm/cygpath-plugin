@@ -42,6 +42,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.Map;
+import java.io.InputStream;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * If we are on Windows, convert the path of the executable via Cygwin.
@@ -114,21 +117,33 @@ public class CygpathLauncherDecorator extends LauncherDecorator {
             JnaException err=null;
             for (String prefix : new String[]{"SOFTWARE\\Wow6432Node\\","SOFTWARE\\"}) {
                 try {// Cygwin 1.7
-                    RegistryKey key = RegistryKey.LOCAL_MACHINE.openReadonly(prefix+"Cygwin\\setup");
+                    Process process = Runtime.getRuntime().exec("REG QUERY HKEY_LOCAL_MACHINE\\" + prefix + "Cygwin\\setup");
+                    InputStream is = process.getInputStream();
+                    StringBuilder sw = new StringBuilder();
                     try {
-                        return new File(key.getStringValue("rootdir"));
-                    } finally {
-                        key.dispose();
+                        int c;
+                        while ((c = is.read()) != -1)
+                            sw.append((char)c);
                     }
-                } catch (JnaException e) {
-                    err = e; // fall through
-                }
-                try {// Cygwin 1.5 (there's no Cygwin 1.6 ever released)
-                    RegistryKey key = RegistryKey.LOCAL_MACHINE.openReadonly(prefix+"Cygnus Solutions\\Cygwin\\mounts v2\\/");
+                    catch (IOException e) {
+                          LOGGER.log(Level.SEVERE, "Exception raised" + e);
+                          break;
+                    }
+
+                    String output = sw.toString();
+                    if(output.isEmpty()) throw new JnaException(1); //check next value in for loop
+
+                    String[] bits = output.split(" ");
+                    String key = bits[bits.length-1];
+                    key = key.replaceAll("\r", "").replaceAll("\n", "").replaceAll(" ", "");
+                    LOGGER.log(Level.INFO, "Cygwin path for " + prefix + " is " + key);
+
                     try {
-                        return new File(key.getStringValue("native"));
-                    } finally {
-                        key.dispose();
+                        return new File(key);
+                    }
+                    catch (Exception e) {
+                        LOGGER.log(Level.SEVERE, "Failed to return Cygwin path" + e);
+                       // fall through
                     }
                 } catch (JnaException e) {
                     err = e; // fall through
@@ -142,4 +157,5 @@ public class CygpathLauncherDecorator extends LauncherDecorator {
             return new File(getCygwinRoot(),"bin\\cygpath").getPath();
         }
     }
+    private static final Logger LOGGER = Logger.getLogger(CygpathLauncherDecorator.class.getName());
 }
